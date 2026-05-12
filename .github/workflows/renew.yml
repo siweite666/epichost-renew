@@ -2,8 +2,8 @@ name: Auto Renew EpicHost Server
 
 on:
   schedule:
-    # Every 7 hours (UTC 01:00, 08:00, 15:00, 22:00)
-    - cron: '0 1,8,15,22 * * *'
+    # Every 6 hours (UTC 00:30, 06:30, 12:30, 18:30)
+    - cron: '30 0,6,12,18 * * *'
   workflow_dispatch: # Manual trigger
 
 jobs:
