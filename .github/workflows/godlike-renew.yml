@@ -2,9 +2,8 @@ name: GODLIKE 视频续期
 
 on:
   schedule:
-    # 每20小时运行一次（视频续期+24h，留4h安全余量）
-    - cron: '0 0,20 * * *'
-  workflow_dispatch: # 手动触发
+    - cron: '0 0,20 * * *'  # 每20小时
+  workflow_dispatch:
 
 jobs:
   renew:
@@ -28,6 +27,9 @@ jobs:
 
       - name: Run video watcher
         id: watch
+        env:
+          GODLIKE_EMAIL: ${{ secrets.GODLIKE_EMAIL }}
+          GODLIKE_PASSWORD: ${{ secrets.GODLIKE_PASSWORD }}
         run: node watch-video.js
 
       - name: Notify Telegram
@@ -40,12 +42,8 @@ jobs:
           if [ -z "$MSG" ]; then
             MSG="⚠️ GODLIKE 续期脚本异常退出"
           fi
-
           if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT_ID" ]; then
             curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
               -H "Content-Type: application/json" \
-              -d "{\"chat_id\":\"${TG_CHAT_ID}\",\"text\":\"${MSG}\",\"parse_mode\":\"HTML\"}" \
-              | python3 -c "import sys,json; d=json.load(sys.stdin); print('📨 Telegram:', 'OK' if d.get('ok') else d.get('description','?'))"
-          else
-            echo "⚠️ Telegram not configured"
+              -d "{\"chat_id\":\"${TG_CHAT_ID}\",\"text\":\"${MSG}\",\"parse_mode\":\"HTML\"}"
           fi
