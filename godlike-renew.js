@@ -4,6 +4,7 @@ import { appendFileSync } from 'fs';
 const GITHUB_OUTPUT = process.env.GITHUB_OUTPUT;
 const API_URL = 'https://panel.godlike.host';
 const SERVER_ID = '6ecbede2';
+const SERVER_UUID = '6ecbede2-5f1f-4a55-892a-13bcc0972730';
 
 function setOutput(msg) {
   if (GITHUB_OUTPUT) appendFileSync(GITHUB_OUTPUT, `msg<<EOF\n${msg}\nEOF\n`);
@@ -12,9 +13,26 @@ function setOutput(msg) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+async function getTimer() {
+  if (!process.env.GODLIKE_TOKEN) return 'unknown';
+  try {
+    const { default: fetch } = await import('node-fetch');
+    const resp = await fetch(`${API_URL}/api/client/servers/${SERVER_UUID}`, {
+      headers: { 'Authorization': `Bearer ${process.env.GODLIKE_TOKEN}`, 'Accept': 'application/json' }
+    });
+    if (!resp.ok) return 'unknown';
+    const data = await resp.json();
+    return data.attributes?.free_timer || 'unknown';
+  } catch { return 'unknown'; }
+}
+
 async function main() {
   const timeCN = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
   console.log(`🎮 GODLIKE 续期 (90分钟) 开始 — ${timeCN}`);
+
+  // 查当前到期时间
+  const timerBefore = await getTimer();
+  console.log(`📅 当前到期时间: ${timerBefore}`);
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -23,23 +41,17 @@ async function main() {
   const page = await context.newPage();
 
   try {
-    // Login
-    console.log('🔐 登录 panel.godlike.host...');
+    // 登录
+    console.log('🔐 登录...');
     await page.goto(`${API_URL}/auth/login`, { waitUntil: 'networkidle', timeout: 30000 });
     await sleep(2000);
 
     const authBtn = await page.$('button:has-text("Authorization"), a:has-text("Authorization")');
-    if (authBtn && await authBtn.isVisible()) {
-      await authBtn.click();
-      await sleep(2000);
-    }
+    if (authBtn && await authBtn.isVisible()) { await authBtn.click(); await sleep(2000); }
 
     const email = process.env.GODLIKE_EMAIL;
     const password = process.env.GODLIKE_PASSWORD;
-    if (!email || !password) {
-      setOutput('❌ 未配置 GODLIKE_EMAIL 或 GODLIKE_PASSWORD');
-      process.exit(1);
-    }
+    if (!email || !password) { setOutput('❌ 未配置 GODLIKE_EMAIL/PASSWORD'); process.exit(1); }
 
     await page.fill('input[type="email"], input[name="email"], input[placeholder*="mail"]', email);
     await page.fill('input[type="password"], input[name="password"]', password);
@@ -49,51 +61,48 @@ async function main() {
     await sleep(3000);
     console.log('✅ 登录完成');
 
-    // Navigate to server page
+    // 导航到服务器
     await page.goto(`${API_URL}/server/${SERVER_ID}`, { waitUntil: 'networkidle', timeout: 30000 });
     await sleep(3000);
 
     const bodyText = await page.textContent('body').catch(() => '');
 
-    // Check if already on cooldown
+    // 检查是否已在冷却中
     if (bodyText.includes('Please wait')) {
-      setOutput(`⏳ GODLIKE 已在冷却中 (上次续期后)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
+      const timerAfter = await getTimer();
+      setOutput(`⏳ GODLIKE 已在冷却中 (上次续期后)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerAfter}`);
       await browser.close();
       return;
     }
 
-    // Click "Add 90 minutes"
+    // 点 "Add 90 minutes"
     let addBtn = await page.$('button:has-text("Add 90 minutes"), button:has-text("90 minutes")');
     if (!addBtn) {
-      const buttons = await page.$$('button');
-      for (const btn of buttons) {
+      for (const btn of await page.$$('button')) {
         const text = await btn.textContent().catch(() => '');
         if (text.includes('90') && text.includes('minute')) { addBtn = btn; break; }
       }
     }
-
     if (!addBtn || !(await addBtn.isVisible().catch(() => false))) {
       setOutput(`❌ 未找到 "Add 90 minutes" 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
       process.exit(1);
     }
-
     await addBtn.click();
     await sleep(2000);
 
-    // Click "Watch advertisment"
+    // 点 "Watch advertisment"
     let watchBtn = await page.$('button:has-text("Watch advertisment")');
     if (!watchBtn) {
-      const buttons = await page.$$('button');
-      for (const btn of buttons) {
+      for (const btn of await page.$$('button')) {
         const text = await btn.textContent().catch(() => '');
         if (text.toLowerCase().includes('watch') && text.toLowerCase().includes('advertis')) { watchBtn = btn; break; }
       }
     }
-
     if (!watchBtn || !(await watchBtn.isVisible().catch(() => false))) {
       const afterText = await page.textContent('body').catch(() => '');
       if (afterText.includes('Please wait')) {
-        setOutput(`⏳ GODLIKE 已在冷却中\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
+        const timerAfter = await getTimer();
+        setOutput(`⏳ GODLIKE 已在冷却中\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerAfter}`);
         return;
       }
       setOutput(`❌ 未找到 "Watch advertisment" 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
@@ -104,7 +113,7 @@ async function main() {
     console.log('✅ 已点击 Watch advertisment');
     await sleep(5000);
 
-    // Wait for ad cooldown
+    // 等待广告冷却
     const startTime = Date.now();
     let detectedCooldown = false;
 
@@ -112,7 +121,6 @@ async function main() {
       await sleep(15000);
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       const text = await page.textContent('body').catch(() => '');
-
       if (text.includes('Please wait')) {
         detectedCooldown = true;
         console.log(`⏳ ${elapsed}s - 冷却中`);
@@ -125,10 +133,13 @@ async function main() {
 
     await browser.close();
 
+    // 查续期后到期时间
+    const timerAfter = await getTimer();
+
     if (detectedCooldown) {
-      setOutput(`✅ GODLIKE 续期成功 (+90分钟)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
+      setOutput(`✅ GODLIKE 续期成功 (+90分钟)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerBefore} → ${timerAfter}`);
     } else {
-      setOutput(`⚠️ GODLIKE 续期结果不确定\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n请手动检查面板`);
+      setOutput(`⚠️ GODLIKE 续期结果不确定\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerBefore} → ${timerAfter}`);
     }
 
   } catch (err) {
