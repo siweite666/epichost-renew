@@ -1,50 +1,48 @@
-name: GODLIKE 视频续期
+name: Auto Renew GODLIKE Server
 
 on:
   schedule:
-    # 每60分钟运行一次（广告续期+90min，留余量）
-    - cron: '0 * * * *'
-  workflow_dispatch:
+    - cron: '0 * * * *'   # 每小时运行一次
+  workflow_dispatch: {}
 
 jobs:
   renew:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install Playwright
+      - name: Install dependencies
         run: |
           npm init -y
           npm pkg set type=module
-          npm install playwright
+          npm install playwright node-fetch
           npx playwright install chromium --with-deps
 
-      - name: Run video watcher
-        id: watch
+      - name: Run renewal script
+        id: renew
         env:
           GODLIKE_EMAIL: ${{ secrets.GODLIKE_EMAIL }}
           GODLIKE_PASSWORD: ${{ secrets.GODLIKE_PASSWORD }}
-        run: node watch-video.js
+          GODLIKE_TOKEN: ${{ secrets.GODLIKE_TOKEN }}
+        run: node godlike-renew.js
 
-      - name: Notify Telegram
+      - name: Telegram notification
         if: always()
         env:
-          TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
-          MSG="${{ steps.watch.outputs.msg }}"
-          if [ -z "$MSG" ]; then
-            MSG="⚠️ GODLIKE 续期脚本异常退出"
-          fi
-          if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT_ID" ]; then
-            curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-              -H "Content-Type: application/json" \
-              -d "{\"chat_id\":\"${TG_CHAT_ID}\",\"text\":\"${MSG}\",\"parse_mode\":\"HTML\"}"
+          MSG="${{ steps.renew.outputs.msg }}"
+          if [ -z "$MSG" ]; then MSG="⚠️ GODLIKE 续期脚本异常退出"; fi
+          if [ -n "$TG_BOT_TOKEN" ] && [ -n "$TG_CHAT_ID" ]; then
+            curl -s "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+              -d "chat_id=${TG_CHAT_ID}" \
+              -d "text=${MSG}" \
+              -d "parse_mode=HTML" || true
           fi
