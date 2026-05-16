@@ -2,13 +2,13 @@ name: Auto Renew GODLIKE Server
 
 on:
   schedule:
-    - cron: '0 * * * *'  # 每小时运行
+    - cron: '0 */20 * * *'  # 每20小时 (24h续期)
   workflow_dispatch: {}
 
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +22,7 @@ jobs:
           npm init -y
           npm pkg set type=module
           npm install playwright node-fetch
-          npx playwright install chromium --with-deps
+          npx playwright install firefox --with-deps
 
       - name: Run renewal script
         id: renew
