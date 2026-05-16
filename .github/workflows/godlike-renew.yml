@@ -2,7 +2,7 @@ name: GODLIKE 视频续期
 
 on:
   schedule:
-    # 每20小时运行一次（视频续期+24h，留4小时安全余量）
+    # 每20小时运行一次（视频续期+24h，留4h安全余量）
     - cron: '0 0,20 * * *'
   workflow_dispatch: # 手动触发
 
@@ -23,13 +23,11 @@ jobs:
         run: |
           npm init -y
           npm pkg set type=module
-          npm install playwright node-fetch
+          npm install playwright
           npx playwright install chromium --with-deps
 
       - name: Run video watcher
         id: watch
-        env:
-          GODLIKE_COOKIE: ${{ secrets.GODLIKE_COOKIE }}
         run: node watch-video.js
 
       - name: Notify Telegram
