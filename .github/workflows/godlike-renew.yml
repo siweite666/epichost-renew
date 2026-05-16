@@ -22,6 +22,7 @@ jobs:
       - name: Install Playwright
         run: |
           npm init -y
+          npm pkg set type=module
           npm install playwright
           npx playwright install chromium --with-deps
 

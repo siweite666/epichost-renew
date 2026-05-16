@@ -3,8 +3,17 @@
  * 使用 Playwright 模拟浏览器观看视频获取续期时长
  */
 import { chromium } from 'playwright';
+import { appendFileSync } from 'fs';
 
 const COOKIE = process.env.GODLIKE_COOKIE;
+const GITHUB_OUTPUT = process.env.GITHUB_OUTPUT;
+
+function setOutput(msg) {
+  if (GITHUB_OUTPUT) {
+    appendFileSync(GITHUB_OUTPUT, `msg<<EOF\n${msg}\nEOF\n`);
+  }
+  console.log(msg);
+}
 const PANEL_URL = 'https://panel.godlike.host';
 const SERVER_UUID = '6ecbede2-5f1f-4a55-892a-13bcc0972730';
 
@@ -183,23 +192,14 @@ async function main() {
   await browser.close();
 
   if (completed) {
-    console.log('msg<<EOF');
-    console.log('✅ GODLIKE 服务器续期成功');
-    console.log('━━━━━━━━━━━━━━━');
-    console.log(`🕐 时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`);
-    console.log('EOF');
+    setOutput(`✅ GODLIKE 服务器续期成功\n━━━━━━━━━━━━━━━\n🕐 时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`);
   } else {
-    console.log('msg<<EOF');
-    console.log('❌ GODLIKE 视频观看超时');
-    console.log('━━━━━━━━━━━━━━━');
-    console.log(`🕐 时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`);
-    console.log('可能原因: Cookie过期 / 视频页面结构变化 / 网络问题');
-    console.log('EOF');
+    setOutput(`❌ GODLIKE 视频观看超时\n━━━━━━━━━━━━━━━\n🕐 时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}\n可能原因: Cookie过期 / 视频页面结构变化 / 网络问题`);
     process.exit(1);
   }
 }
 
 main().catch(err => {
-  console.error('❌ 脚本错误:', err.message);
+  setOutput(`❌ GODLIKE 脚本错误: ${err.message}`);
   process.exit(1);
 });
