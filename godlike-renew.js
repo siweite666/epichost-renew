@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { appendFileSync } from 'fs';
+import { appendFileSync, writeFileSync } from 'fs';
 
 const GITHUB_OUTPUT = process.env.GITHUB_OUTPUT;
 const API_URL = 'https://panel.godlike.host';
@@ -18,17 +18,21 @@ async function main() {
   console.log(`🎮 GODLIKE 续期 (90分钟) 开始 — ${timeCN}`);
 
   // Check current expiry via API
-  const { default: fetch } = await import('node-fetch');
   let freeTimer = 'unknown';
-  try {
-    const resp = await fetch(`${API_URL}/api/client/servers/${SERVER_UUID}`, {
-      headers: { 'Authorization': `Bearer ${process.env.GODLIKE_TOKEN}`, 'Accept': 'application/json' }
-    });
-    const data = await resp.json();
-    freeTimer = data.attributes?.free_timer || 'unknown';
-    console.log(`📅 当前到期时间: ${freeTimer}`);
-  } catch (e) {
-    console.log('⚠️ 无法获取当前到期时间:', e.message);
+  if (process.env.GODLIKE_TOKEN) {
+    try {
+      const { default: fetch } = await import('node-fetch');
+      const resp = await fetch(`${API_URL}/api/client/servers/${SERVER_UUID}`, {
+        headers: { 'Authorization': `Bearer ${process.env.GODLIKE_TOKEN}`, 'Accept': 'application/json' }
+      });
+      const data = await resp.json();
+      freeTimer = data.attributes?.free_timer || 'unknown';
+      console.log(`📅 当前到期时间: ${freeTimer}`);
+    } catch (e) {
+      console.log('⚠️ 无法获取当前到期时间:', e.message);
+    }
+  } else {
+    console.log('⚠️ GODLIKE_TOKEN 未配置，跳过 API 验证');
   }
 
   // Launch browser
@@ -44,7 +48,6 @@ async function main() {
     await page.goto(`${API_URL}/auth/login`, { waitUntil: 'networkidle', timeout: 30000 });
     await sleep(2000);
 
-    // Click "Authorization" button to reveal login form
     const authBtn = await page.$('button:has-text("Authorization"), a:has-text("Authorization")');
     if (authBtn && await authBtn.isVisible()) {
       await authBtn.click();
@@ -52,7 +55,6 @@ async function main() {
       console.log('✅ 点击 Authorization 按钮');
     }
 
-    // Fill email/password
     const email = process.env.GODLIKE_EMAIL;
     const password = process.env.GODLIKE_PASSWORD;
     if (!email || !password) {
@@ -74,6 +76,23 @@ async function main() {
     await sleep(3000);
     console.log('✅ 服务器页面:', page.url());
 
+    // Screenshot before clicking
+    await page.screenshot({ path: '/tmp/godlike-before.png', fullPage: true });
+    console.log('📸 已截图 (before)');
+
+    // Read page text for analysis
+    const bodyText = await page.textContent('body').catch(() => '');
+    console.log('📄 页面文本 (前500字):', bodyText.substring(0, 500));
+
+    // Check if already on cooldown
+    if (bodyText.includes('Please wait')) {
+      const waitMatch = bodyText.match(/Please wait (\d+) minutes?/);
+      const waitMsg = waitMatch ? waitMatch[0] : 'Please wait';
+      setOutput(`⏳ GODLIKE 续期冷却中 — ${waitMsg}\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期时间: ${freeTimer}`);
+      await browser.close();
+      return;
+    }
+
     // Click "Add 90 minutes"
     console.log('🔍 查找 "Add 90 minutes" 按钮...');
     let addBtn = await page.$('button:has-text("Add 90 minutes"), button:has-text("90 minutes")');
@@ -88,19 +107,18 @@ async function main() {
       }
     }
 
-    if (!addBtn || !(await addBtn.isVisible())) {
-      const bodyText = await page.textContent('body');
-      if (bodyText.includes('Please wait')) {
-        setOutput(`⏳ GODLIKE 续期冷却中\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期时间: ${freeTimer}`);
-        return;
-      }
-      setOutput(`❌ 未找到 "Add 90 minutes" 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
+    if (!addBtn || !(await addBtn.isVisible().catch(() => false))) {
+      setOutput(`❌ 未找到 "Add 90 minutes" 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n页面文本: ${bodyText.substring(0, 200)}`);
+      await page.screenshot({ path: '/tmp/godlike-no-button.png', fullPage: true });
       process.exit(1);
     }
 
     console.log('✅ 找到按钮，点击...');
     await addBtn.click();
     await sleep(2000);
+
+    // Screenshot after clicking Add 90 min
+    await page.screenshot({ path: '/tmp/godlike-after-add.png', fullPage: true });
 
     // Click "Watch advertisment" (typo is intentional)
     console.log('🔍 查找 "Watch advertisment" 按钮...');
@@ -116,59 +134,74 @@ async function main() {
       }
     }
 
-    if (!watchBtn || !(await watchBtn.isVisible())) {
-      const bodyText = await page.textContent('body');
-      if (bodyText.includes('Please wait')) {
+    if (!watchBtn || !(await watchBtn.isVisible().catch(() => false))) {
+      const afterText = await page.textContent('body').catch(() => '');
+      if (afterText.includes('Please wait')) {
         setOutput(`⏳ GODLIKE 广告冷却中\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期时间: ${freeTimer}`);
         return;
       }
-      setOutput(`❌ 未找到 "Watch advertisment" 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
+      setOutput(`❌ 未找到 "Watch advertisment" 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n弹窗文本: ${afterText.substring(0, 300)}`);
+      await page.screenshot({ path: '/tmp/godlike-no-watch.png', fullPage: true });
       process.exit(1);
     }
 
     console.log('✅ 点击 "Watch advertisment"...');
     await watchBtn.click();
-    await sleep(3000);
+    await sleep(5000);
 
-    // Wait for ad to complete (~4 min cooldown)
+    // Screenshot after clicking Watch
+    await page.screenshot({ path: '/tmp/godlike-after-watch.png', fullPage: true });
+    const watchText = await page.textContent('body').catch(() => '');
+    console.log('📄 点击后页面文本 (前300字):', watchText.substring(0, 300));
+
+    // Wait for ad to complete (~4 min)
     console.log('⏳ 等待广告播放完成 (约 240 秒)...');
     const startTime = Date.now();
-    let completed = false;
+    let detectedCooldown = false;
+    let detectedReady = false;
 
     while ((Date.now() - startTime) < 300000) {
       await sleep(15000);
       const elapsed = Math.round((Date.now() - startTime) / 1000);
-      const bodyText = await page.textContent('body').catch(() => '');
+      const bodyText2 = await page.textContent('body').catch(() => '');
 
-      if (bodyText.includes('Add 90 minutes') && !bodyText.includes('Please wait')) {
-        console.log(`✅ 广告完成，续期成功! (${elapsed}s)`);
-        completed = true;
+      if (bodyText2.includes('Please wait')) {
+        detectedCooldown = true;
+        const waitMatch = bodyText2.match(/Please wait (\d+) minutes?/);
+        console.log(`⏳ ${elapsed}s - 冷却中: ${waitMatch ? waitMatch[0] : 'Please wait'}`);
+      } else if (bodyText2.includes('Add 90 minutes')) {
+        detectedReady = true;
+        console.log(`✅ ${elapsed}s - 按钮恢复可用，续期成功!`);
         break;
-      }
-
-      const waitMatch = bodyText.match(/Please wait (\d+) minutes?/);
-      if (waitMatch) {
-        console.log(`⏳ ${elapsed}s - 冷却中: 还需等待 ${waitMatch[1]} 分钟`);
       } else {
         console.log(`⏳ ${elapsed}s - 等待中...`);
       }
     }
 
-    // Verify via API
-    let newTimer = 'unknown';
-    try {
-      const resp = await fetch(`${API_URL}/api/client/servers/${SERVER_UUID}`, {
-        headers: { 'Authorization': `Bearer ${process.env.GODLIKE_TOKEN}`, 'Accept': 'application/json' }
-      });
-      const data = await resp.json();
-      newTimer = data.attributes?.free_timer || 'unknown';
-      console.log(`📅 新到期时间: ${newTimer}`);
-    } catch {}
+    // Final screenshot
+    await page.screenshot({ path: '/tmp/godlike-final.png', fullPage: true });
 
-    if (completed) {
+    // Determine result
+    const success = detectedReady || detectedCooldown;
+
+    // Verify via API if token available
+    let newTimer = 'unknown';
+    if (process.env.GODLIKE_TOKEN) {
+      try {
+        const { default: fetch } = await import('node-fetch');
+        const resp = await fetch(`${API_URL}/api/client/servers/${SERVER_UUID}`, {
+          headers: { 'Authorization': `Bearer ${process.env.GODLIKE_TOKEN}`, 'Accept': 'application/json' }
+        });
+        const data = await resp.json();
+        newTimer = data.attributes?.free_timer || 'unknown';
+        console.log(`📅 新到期时间: ${newTimer}`);
+      } catch {}
+    }
+
+    if (success) {
       setOutput(`✅ GODLIKE 续期成功 (+90分钟)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${freeTimer} → ${newTimer}`);
     } else {
-      setOutput(`⚠️ GODLIKE 续期可能未完成\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${freeTimer}\n📅 现在: ${newTimer}`);
+      setOutput(`⚠️ GODLIKE 续期结果不确定\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${freeTimer} → ${newTimer}\n检测到冷却: ${detectedCooldown}, 按钮恢复: ${detectedReady}\n请手动检查服务器`);
     }
 
   } finally {
