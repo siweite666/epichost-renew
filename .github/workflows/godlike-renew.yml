@@ -2,7 +2,8 @@ name: GODLIKE 视频续期
 
 on:
   schedule:
-    - cron: '0 0,20 * * *'  # 每20小时
+    # 每60分钟运行一次（广告续期+90min，留余量）
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:
