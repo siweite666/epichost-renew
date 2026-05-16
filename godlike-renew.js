@@ -17,7 +17,7 @@ async function main() {
   const timeCN = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
   console.log(`🎮 GODLIKE 续期 (90分钟) 开始 — ${timeCN}`);
 
-  // 1. Check current expiry via API
+  // Check current expiry via API
   const { default: fetch } = await import('node-fetch');
   let freeTimer = 'unknown';
   try {
@@ -31,7 +31,7 @@ async function main() {
     console.log('⚠️ 无法获取当前到期时间:', e.message);
   }
 
-  // 2. Launch browser
+  // Launch browser
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
@@ -39,7 +39,7 @@ async function main() {
   const page = await context.newPage();
 
   try {
-    // 3. Login
+    // Login
     console.log('🔐 登录 panel.godlike.host...');
     await page.goto(`${API_URL}/auth/login`, { waitUntil: 'networkidle', timeout: 30000 });
     await sleep(2000);
@@ -68,17 +68,16 @@ async function main() {
     await sleep(3000);
     console.log('✅ 登录完成, URL:', page.url());
 
-    // 4. Navigate to server page
+    // Navigate to server page
     console.log('📡 导航到服务器页面...');
     await page.goto(`${API_URL}/server/${SERVER_ID}`, { waitUntil: 'networkidle', timeout: 30000 });
     await sleep(3000);
     console.log('✅ 服务器页面:', page.url());
 
-    // 5. Click "Add 90 minutes"
+    // Click "Add 90 minutes"
     console.log('🔍 查找 "Add 90 minutes" 按钮...');
     let addBtn = await page.$('button:has-text("Add 90 minutes"), button:has-text("90 minutes")');
     if (!addBtn) {
-      // Try text content match
       const buttons = await page.$$('button');
       for (const btn of buttons) {
         const text = await btn.textContent().catch(() => '');
@@ -90,13 +89,12 @@ async function main() {
     }
 
     if (!addBtn || !(await addBtn.isVisible())) {
-      // Check if already on cooldown
       const bodyText = await page.textContent('body');
       if (bodyText.includes('Please wait')) {
-        setOutput(`⏳ GODLIKE 续期冷却中（已等待中）\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期时间: ${freeTimer}`);
+        setOutput(`⏳ GODLIKE 续期冷却中\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期时间: ${freeTimer}`);
         return;
       }
-      setOutput(`❌ 未找到 "Add 90 minutes" 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n页面可能已变化`);
+      setOutput(`❌ 未找到 "Add 90 minutes" 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
       process.exit(1);
     }
 
@@ -104,7 +102,7 @@ async function main() {
     await addBtn.click();
     await sleep(2000);
 
-    // 6. Click "Watch advertisment" (note: typo is intentional, match exactly)
+    // Click "Watch advertisment" (typo is intentional)
     console.log('🔍 查找 "Watch advertisment" 按钮...');
     let watchBtn = await page.$('button:has-text("Watch advertisment")');
     if (!watchBtn) {
@@ -119,7 +117,6 @@ async function main() {
     }
 
     if (!watchBtn || !(await watchBtn.isVisible())) {
-      // Maybe already showing cooldown
       const bodyText = await page.textContent('body');
       if (bodyText.includes('Please wait')) {
         setOutput(`⏳ GODLIKE 广告冷却中\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期时间: ${freeTimer}`);
@@ -133,7 +130,7 @@ async function main() {
     await watchBtn.click();
     await sleep(3000);
 
-    // 7. Wait for ad to complete (~4 min cooldown)
+    // Wait for ad to complete (~4 min cooldown)
     console.log('⏳ 等待广告播放完成 (约 240 秒)...');
     const startTime = Date.now();
     let completed = false;
@@ -157,7 +154,7 @@ async function main() {
       }
     }
 
-    // 8. Verify via API
+    // Verify via API
     let newTimer = 'unknown';
     try {
       const resp = await fetch(`${API_URL}/api/client/servers/${SERVER_UUID}`, {
@@ -169,9 +166,9 @@ async function main() {
     } catch {}
 
     if (completed) {
-      setOutput(`✅ GODLIKE 续期成功 (+90分钟)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期时间: ${freeTimer} → ${newTimer}`);
+      setOutput(`✅ GODLIKE 续期成功 (+90分钟)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${freeTimer} → ${newTimer}`);
     } else {
-      setOutput(`⚠️ GODLIKE 续期可能未完成\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${freeTimer}\n📅 现在: ${newTimer}\n请手动检查`);
+      setOutput(`⚠️ GODLIKE 续期可能未完成\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${freeTimer}\n📅 现在: ${newTimer}`);
     }
 
   } finally {
