@@ -2,13 +2,13 @@ name: Auto Renew GODLIKE Server
 
 on:
   schedule:
-    - cron: '0 */20 * * *'  # 每20小时运行一次 (24h续期留4h余量)
+    - cron: '0 * * * *'  # 每小时运行
   workflow_dispatch: {}
 
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
