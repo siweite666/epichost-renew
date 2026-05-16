@@ -13,17 +13,25 @@ function setOutput(msg) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+function utcToBeijing(utcStr) {
+  try {
+    const d = new Date(utcStr);
+    return d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  } catch { return utcStr; }
+}
+
 async function getTimer() {
-  if (!process.env.GODLIKE_TOKEN) return 'unknown';
+  if (!process.env.GODLIKE_TOKEN) return { raw: 'unknown', beijing: 'unknown' };
   try {
     const { default: fetch } = await import('node-fetch');
     const resp = await fetch(`${API_URL}/api/client/servers/${SERVER_UUID}`, {
       headers: { 'Authorization': `Bearer ${process.env.GODLIKE_TOKEN}`, 'Accept': 'application/json' }
     });
-    if (!resp.ok) return 'unknown';
+    if (!resp.ok) return { raw: 'unknown', beijing: 'unknown' };
     const data = await resp.json();
-    return data.attributes?.free_timer || 'unknown';
-  } catch { return 'unknown'; }
+    const raw = data.attributes?.free_timer || 'unknown';
+    return { raw, beijing: raw === 'unknown' ? 'unknown' : utcToBeijing(raw) };
+  } catch { return { raw: 'unknown', beijing: 'unknown' }; }
 }
 
 async function main() {
@@ -31,7 +39,7 @@ async function main() {
   console.log(`🎮 GODLIKE 续期 (90分钟) 开始 — ${timeCN}`);
 
   const timerBefore = await getTimer();
-  console.log(`📅 当前到期时间: ${timerBefore}`);
+  console.log(`📅 当前到期时间: ${timerBefore.beijing}`);
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -64,7 +72,7 @@ async function main() {
     const bodyText = await page.textContent('body').catch(() => '');
     if (bodyText.includes('Please wait')) {
       const timerAfter = await getTimer();
-      setOutput(`⏳ GODLIKE 已在冷却中\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerAfter}`);
+      setOutput(`⏳ GODLIKE 已在冷却中\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerAfter.beijing}`);
       await browser.close();
       return;
     }
@@ -94,7 +102,7 @@ async function main() {
       const afterText = await page.textContent('body').catch(() => '');
       if (afterText.includes('Please wait')) {
         const timerAfter = await getTimer();
-        setOutput(`⏳ GODLIKE 已在冷却中\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerAfter}`);
+        setOutput(`⏳ GODLIKE 已在冷却中\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerAfter.beijing}`);
         return;
       }
       setOutput(`❌ 未找到 "Watch advertisment" 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
@@ -126,9 +134,9 @@ async function main() {
     const timerAfter = await getTimer();
 
     if (detectedCooldown) {
-      setOutput(`✅ GODLIKE 续期成功 (+90分钟)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerBefore} → ${timerAfter}`);
+      setOutput(`✅ GODLIKE 续期成功 (+90分钟)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerBefore.beijing} → ${timerAfter.beijing}`);
     } else {
-      setOutput(`⚠️ GODLIKE 续期结果不确定\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerBefore} → ${timerAfter}`);
+      setOutput(`⚠️ GODLIKE 续期结果不确定\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerBefore.beijing} → ${timerAfter.beijing}`);
     }
 
   } catch (err) {
