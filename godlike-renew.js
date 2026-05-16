@@ -1,10 +1,11 @@
-import { chromium } from 'playwright';
+import { firefox } from 'playwright';
 import { appendFileSync } from 'fs';
 
 const GITHUB_OUTPUT = process.env.GITHUB_OUTPUT;
-const API_URL = 'https://panel.godlike.host';
+const PANEL_URL = 'https://panel.godlike.host';
+const ULTRA_URL = 'https://ultra.panel.godlike.host';
 const SERVER_ID = '6ecbede2';
-const SERVER_UUID = '6ecbede2-5f1f-4a55-892a-13bcc0972730';
+const VIDEO_DURATION = 300;
 
 function setOutput(msg) {
   if (GITHUB_OUTPUT) appendFileSync(GITHUB_OUTPUT, `msg<<EOF\n${msg}\nEOF\n`);
@@ -13,36 +14,22 @@ function setOutput(msg) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-async function getTimer() {
-  if (!process.env.GODLIKE_TOKEN) return 'unknown';
-  try {
-    const { default: fetch } = await import('node-fetch');
-    const resp = await fetch(`${API_URL}/api/client/servers/${SERVER_UUID}`, {
-      headers: { 'Authorization': `Bearer ${process.env.GODLIKE_TOKEN}`, 'Accept': 'application/json' }
-    });
-    if (!resp.ok) return 'unknown';
-    const data = await resp.json();
-    return data.attributes?.free_timer || 'unknown';
-  } catch { return 'unknown'; }
-}
-
 async function main() {
   const timeCN = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
-  console.log(`🎮 GODLIKE 续期 (90分钟) 开始 — ${timeCN}`);
+  console.log(`🎮 GODLIKE 24h 续期 (Firefox) 开始 — ${timeCN}`);
 
-  const timerBefore = await getTimer();
-  console.log(`📅 当前到期时间: ${timerBefore}`);
-
-  const browser = await chromium.launch({ headless: true });
+  const browser = await firefox.launch({ headless: true });
   const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0'
   });
   const page = await context.newPage();
 
   try {
-    console.log('🔐 登录...');
-    await page.goto(`${API_URL}/auth/login`, { waitUntil: 'networkidle', timeout: 30000 });
+    // 步骤1: 登录
+    console.log('🔐 步骤1: 登录...');
+    await page.goto(`${PANEL_URL}/auth/login`, { waitUntil: 'networkidle', timeout: 30000 });
     await sleep(2000);
+
     const authBtn = await page.$('button:has-text("Authorization"), a:has-text("Authorization")');
     if (authBtn && await authBtn.isVisible()) { await authBtn.click(); await sleep(2000); }
 
@@ -56,79 +43,118 @@ async function main() {
     await page.click('button[type="submit"], button:has-text("Login"), button:has-text("Sign in")');
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     await sleep(3000);
-    console.log('✅ 登录完成');
+    console.log('✅ 登录完成, URL:', page.url());
 
-    await page.goto(`${API_URL}/server/${SERVER_ID}`, { waitUntil: 'networkidle', timeout: 30000 });
-    await sleep(3000);
-
-    const bodyText = await page.textContent('body').catch(() => '');
-    if (bodyText.includes('Please wait')) {
-      const timerAfter = await getTimer();
-      setOutput(`⏳ GODLIKE 已在冷却中\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerAfter}`);
-      await browser.close();
-      return;
-    }
-
-    let addBtn = await page.$('button:has-text("Add 90 minutes"), button:has-text("90 minutes")');
-    if (!addBtn) {
-      for (const btn of await page.$$('button')) {
-        const text = await btn.textContent().catch(() => '');
-        if (text.includes('90') && text.includes('minute')) { addBtn = btn; break; }
-      }
-    }
-    if (!addBtn || !(await addBtn.isVisible().catch(() => false))) {
-      setOutput(`❌ 未找到 "Add 90 minutes" 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
-      process.exit(1);
-    }
-    await addBtn.click();
-    await sleep(2000);
-
-    let watchBtn = await page.$('button:has-text("Watch advertisment")');
-    if (!watchBtn) {
-      for (const btn of await page.$$('button')) {
-        const text = await btn.textContent().catch(() => '');
-        if (text.toLowerCase().includes('watch') && text.toLowerCase().includes('advertis')) { watchBtn = btn; break; }
-      }
-    }
-    if (!watchBtn || !(await watchBtn.isVisible().catch(() => false))) {
-      const afterText = await page.textContent('body').catch(() => '');
-      if (afterText.includes('Please wait')) {
-        const timerAfter = await getTimer();
-        setOutput(`⏳ GODLIKE 已在冷却中\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerAfter}`);
-        return;
-      }
-      setOutput(`❌ 未找到 "Watch advertisment" 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
-      process.exit(1);
-    }
-
-    await watchBtn.click();
-    console.log('✅ 已点击 Watch advertisment');
+    // 步骤2: 导航到 ultra 面板
+    console.log('📡 步骤2: 导航到 ultra 面板...');
+    await page.goto(`${ULTRA_URL}/server/${SERVER_ID}`, { waitUntil: 'networkidle', timeout: 60000 });
     await sleep(5000);
+    console.log('✅ ultra 面板 URL:', page.url());
 
-    const startTime = Date.now();
-    let detectedCooldown = false;
+    // 截图看看页面状态
+    await page.screenshot({ path: '/tmp/godlike-ultra-firefox.png', fullPage: true });
+    console.log('📸 已截图');
 
-    while ((Date.now() - startTime) < 300000) {
-      await sleep(15000);
-      const elapsed = Math.round((Date.now() - startTime) / 1000);
-      const text = await page.textContent('body').catch(() => '');
-      if (text.includes('Please wait')) {
-        detectedCooldown = true;
-        console.log(`⏳ ${elapsed}s - 冷却中`);
-      } else if (text.includes('Add 90 minutes')) {
-        console.log(`✅ ${elapsed}s - 按钮恢复，续期成功!`);
-        detectedCooldown = true;
+    // 列出页面上所有按钮
+    const buttons = await page.$$('button');
+    const btnTexts = [];
+    for (const btn of buttons) {
+      const t = await btn.textContent().catch(() => '');
+      if (t.trim()) btnTexts.push(t.trim());
+    }
+    console.log('📄 页面按钮:', btnTexts.join(' | '));
+
+    // 关闭弹窗
+    for (let i = 0; i < 3; i++) {
+      const gotIt = await page.$('button:has-text("Got it"), button:has-text("OK"), button:has-text("Close"), button:has-text("Dismiss")');
+      if (gotIt && await gotIt.isVisible().catch(() => false)) {
+        await gotIt.click();
+        console.log(`✅ 关闭弹窗 #${i+1}`);
+        await sleep(1000);
+      }
+    }
+
+    // 步骤3: 点击续期按钮
+    console.log('🔍 步骤3: 查找续期按钮...');
+    const selectors = [
+      'button:has-text("+24")',
+      'button:has-text("24 hours")',
+      'button:has-text("24h")',
+      'button:has-text("FREE Renew")',
+      'button:has-text("Renew")',
+      'button:has-text("Add 90")',
+      'button:has-text("Watch")',
+      'button:has-text("Video")',
+      'button:has-text("YouTube")',
+    ];
+
+    let renewBtn = null;
+    for (const sel of selectors) {
+      const btn = await page.$(sel);
+      if (btn && await btn.isVisible().catch(() => false)) {
+        renewBtn = btn;
+        const text = await btn.textContent().catch(() => sel);
+        console.log(`✅ 找到按钮: "${text.trim()}"`);
         break;
       }
     }
 
-    await browser.close();
-    const timerAfter = await getTimer();
+    if (!renewBtn) {
+      // 再截一张
+      await page.screenshot({ path: '/tmp/godlike-ultra-no-btn.png', fullPage: true });
+      setOutput(`❌ 未找到续期按钮 (Firefox)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n可见按钮: ${btnTexts.join(', ')}`);
+      process.exit(1);
+    }
 
-    if (detectedCooldown) {
-      setOutput(`✅ GODLIKE 续期成功 (+90分钟)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerBefore} → ${timerAfter}`);
+    await renewBtn.click();
+    await sleep(3000);
+    console.log('✅ 已点击续期按钮');
+
+    // 步骤4: 监控视频播放
+    console.log('⏳ 步骤4: 监控视频播放...');
+    const startTime = Date.now();
+    let peakProgress = 0;
+
+    while ((Date.now() - startTime) < 600000) {
+      await sleep(10000);
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+      const videoState = await page.evaluate(() => {
+        const videos = document.querySelectorAll('video');
+        if (videos.length > 0) {
+          const v = videos[0];
+          return { paused: v.paused, currentTime: v.currentTime, duration: v.duration };
+        }
+        return { noVideo: true };
+      }).catch(() => ({ error: true }));
+
+      if (videoState.error || videoState.noVideo) {
+        console.log(`⏳ ${elapsed}s - 未找到视频元素`);
+        continue;
+      }
+
+      const progress = videoState.duration > 0 ? Math.round((videoState.currentTime / videoState.duration) * 100) : 0;
+      if (progress > peakProgress) peakProgress = progress;
+
+      console.log(`⏳ ${elapsed}s/${VIDEO_DURATION}s | 进度: ${progress}% | 峰值: ${peakProgress}% | paused: ${videoState.paused}`);
+
+      if (videoState.currentTime >= VIDEO_DURATION - 5) {
+        console.log(`✅ 视频播放完成! currentTime=${videoState.currentTime}`);
+        break;
+      }
+
+      if (videoState.paused && videoState.currentTime > 0) {
+        await page.evaluate(() => { const v = document.querySelector('video'); if (v) v.play(); }).catch(() => {});
+        console.log('▶️ 尝试恢复播放');
+      }
+    }
+
+    await browser.close();
+
+    if (peakProgress >= 90) {
+      setOutput(`✅ GODLIKE 24h 续期成功 (Firefox)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n⏱️ 视频播放完成 (峰值 ${peakProgress}%)`);
     } else {
-      setOutput(`⚠️ GODLIKE 续期结果不确定\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerBefore} → ${timerAfter}`);
+      setOutput(`⚠️ GODLIKE 24h 续期可能未完成 (Firefox)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📊 峰值进度: ${peakProgress}%`);
     }
 
   } catch (err) {
