@@ -1,15 +1,27 @@
 # EpicHost Server Auto-Renew
 
-🎮 自动续期 EpicHost 免费 Minecraft 服务器
+🎮 自动续期 GODLIKE 免费 Minecraft 服务器
 
-通过 **GitHub Actions** 定时运行，利用 Pterodactyl API 自动续期，无需浏览器自动化。
+## 方案说明
 
-## ✨ 特性
+### 公开页面版（当前方案）
 
-- **纯 API 调用** — 不需要 Playwright/Puppeteer，一个 curl 搞定
-- **多服务器支持** — 逗号分隔配置多个服务器 UUID
-- **零成本** — 利用 GitHub Actions 免费额度（每月 2000 分钟）
-- **手动触发** — 支持手动点击运行测试
+通过 `godlike.cool/{id}` 公开续期页面续期，**不需要登录面板**。
+
+**原理：**
+1. 访问 `godlike.cool/{id}` 公开页面
+2. 填写随机 Minecraft 用户名
+3. 通过音频识别破解 reCAPTCHA
+4. 提交表单续期
+
+**优点：**
+- 不依赖面板登录和广告系统
+- 有 WARP 换 IP 机制，不怕 reCAPTCHA 封 IP
+- reCAPTCHA 被封时自动换 IP 重试，最多 20 次
+
+**缺点：**
+- reCAPTCHA 音频识别不稳定，Google 经常改音频挑战
+- 依赖较重（Chrome + Xvfb + WARP）
 
 ## 🚀 设置步骤
 
@@ -21,40 +33,62 @@
 
 | Secret 名称 | 说明 | 示例 |
 |---|---|---|
-| `PANEL_URL` | 面板地址 | `https://panel.epichost.pl` |
-| `PTERODACTYL_TOKEN` | API Token（`ptlc_` 开头） | `ptlc_xxxx...` |
-| `SERVER_UUIDS` | 服务器 UUID，多个用逗号分隔 | `2d775b58-5256-4b99-xxxx-xxxxxxxxxxxx` |
+| `GODLIKE_ID` | godlike.cool 页面 ID，多个用逗号分隔 | `abc123` |
+| `TG_BOT_TOKEN` | Telegram Bot Token（用于通知） | `123456:ABC-DEF...` |
+| `TG_CHAT_ID` | Telegram Chat ID（接收通知） | `123456789` |
 
-### 3. 获取 API Token
+### 3. 获取 GODLIKE_ID
 
-1. 登录 EpicHost 面板
-2. 点击右上角头像 → **Account Settings**
-3. 找到 **API Credentials** 标签
-4. 点击 **Create API Key**
-5. 复制 `ptlc_` 开头的 Token
-
-### 4. 获取服务器 UUID
-
-方法一：在面板的服务器控制台页面可以看到完整 UUID
-
-方法二：用 API 查询：
-```bash
-curl -s -H "Authorization: Bearer ptlc_你的Token" \
-  "https://panel.epichost.pl/api/client" | python3 -m json.tool
+访问你的 GODLIKE 服务器面板，找到公开续期页面 URL：
 ```
+https://godlike.cool/你的ID
+```
+这个 ID 就是 `GODLIKE_ID` 的值。
 
-### 5. 启用 Actions
+### 4. 启用 Actions
 
 进入仓库 **Actions** 页面，点击 **I understand my workflows, go ahead and enable them**
 
-### 6. 运行时间
+### 5. 运行时间
 
-默认每 **7 小时**自动运行一次（UTC 01:00, 08:00, 15:00, 22:00，即北京时间 09:00, 16:00, 23:00, 06:00）。
+默认每 **6 小时**自动运行一次。
 
-可手动修改 `.github/workflows/renew.yml` 中的 cron 表达式。
+可手动在 Actions 页面点击 **Run workflow** 触发测试。
 
 ## ⚠️ 注意事项
 
-- 每次续期增加 **8 小时**，每 **7 小时**续一次，留 1 小时余量
-- API Token 不要泄露，泄露了立即在面板重新生成
-- 如果 GitHub Actions IP 被封，需要配置代理（在 workflow 中添加 proxy 步骤）
+- reCAPTCHA 音频识别成功率不稳定，不一定每次都能成功
+- 被 reCAPTCHA 封 IP 时会自动用 WARP 换 IP 重试
+- 每个 ID 最多重试 20 次
+- 每次续期增加约 **1 小时**，24 小时累积上限
+- 截图会保存为 Artifact，方便排查问题
+
+## 📋 通知示例
+
+续期成功后会收到 Telegram 通知：
+```
+✅ 续订成功
+
+URL: https://godlike.cool/abc123
+用户名: Alex1234
+
+Godlike Host Public Page Renew
+```
+
+## 🔧 本地测试
+
+```bash
+# 安装依赖
+pip install -r requirements.txt
+
+# 需要 Chrome 和 Xvfb
+sudo apt install google-chrome-stable xvfb ffmpeg
+
+# 配置环境变量
+export GODLIKE_ID="你的ID"
+export TG_BOT_TOKEN="你的Bot Token"
+export TG_CHAT_ID="你的Chat ID"
+
+# 运行
+python renew.py
+```
