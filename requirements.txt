@@ -1,4 +1,6 @@
 DrissionPage>=4.0.0
+DataRecorder
+DownloadKit
 xvfbwrapper>=0.2.9
 SpeechRecognition>=3.10.0
 pydub>=0.25.1

@@ -24,9 +24,10 @@ except ImportError:
 
 try:
     from DrissionPage import ChromiumPage, ChromiumOptions
-except ImportError:
-    ChromiumPage = None
-    ChromiumOptions = None
+except ImportError as e:
+    print(f"[ERROR] DrissionPage 导入失败: {e}", flush=True)
+    print("[ERROR] 请确保 requirements.txt 中包含 DataRecorder 和 DownloadKit", flush=True)
+    sys.exit(1)
 
 try:
     import speech_recognition as sr
