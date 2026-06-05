@@ -34,6 +34,50 @@ async function getTimer() {
   } catch { return { raw: 'unknown', beijing: 'unknown' }; }
 }
 
+async function doLogin(page) {
+  const email = process.env.GODLIKE_EMAIL;
+  const password = process.env.GODLIKE_PASSWORD;
+  if (!email || !password) throw new Error('未配置 GODLIKE_EMAIL/PASSWORD');
+
+  // Navigate to panel login page
+  await page.goto(`${API_URL}/auth/login`, { waitUntil: 'networkidle', timeout: 30000 });
+  await sleep(3000);
+
+  // Click Authorization button to start OAuth
+  const authBtn = await page.$('button:has-text("Authorization"), a:has-text("Authorization")');
+  if (authBtn && await authBtn.isVisible()) {
+    await authBtn.click();
+    await sleep(3000);
+  }
+
+  // Wait for the login form to appear
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  await sleep(2000);
+
+  // Fill credentials - try multiple selectors
+  const emailSel = 'input[type="email"], input[name="email"], input[placeholder*="mail"], input[name="username"]';
+  const passSel = 'input[type="password"], input[name="password"]';
+  
+  await page.waitForSelector(emailSel, { timeout: 10000 }).catch(() => {});
+  await page.fill(emailSel, email);
+  await page.fill(passSel, password);
+  await sleep(1000);
+
+  // Click submit
+  await page.click('button[type="submit"], button:has-text("Login"), button:has-text("Sign in"), input[type="submit"]');
+  
+  // Wait for redirect back to panel
+  await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+  await sleep(5000);
+
+  // Verify we're back on the panel (not still on login page)
+  const url = page.url();
+  if (url.includes('login') || url.includes('auth')) {
+    throw new Error(`登录失败，仍在登录页: ${url}`);
+  }
+  console.log(`✅ 登录完成，当前页面: ${url}`);
+}
+
 async function main() {
   const timeCN = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
   console.log(`🎮 GODLIKE 续期 (90分钟) 开始 — ${timeCN}`);
@@ -48,26 +92,24 @@ async function main() {
   const page = await context.newPage();
 
   try {
+    // Login with retry
     console.log('🔐 登录...');
-    await page.goto(`${API_URL}/auth/login`, { waitUntil: 'networkidle', timeout: 30000 });
-    await sleep(2000);
-    const authBtn = await page.$('button:has-text("Authorization"), a:has-text("Authorization")');
-    if (authBtn && await authBtn.isVisible()) { await authBtn.click(); await sleep(2000); }
+    let loginOk = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await doLogin(page);
+        loginOk = true;
+        break;
+      } catch (e) {
+        console.log(`⚠️ 登录尝试 ${attempt}/3 失败: ${e.message}`);
+        if (attempt < 3) await sleep(3000);
+      }
+    }
+    if (!loginOk) throw new Error('3次登录尝试全部失败');
 
-    const email = process.env.GODLIKE_EMAIL;
-    const password = process.env.GODLIKE_PASSWORD;
-    if (!email || !password) { setOutput('❌ 未配置 GODLIKE_EMAIL/PASSWORD'); process.exit(1); }
-
-    await page.fill('input[type="email"], input[name="email"], input[placeholder*="mail"]', email);
-    await page.fill('input[type="password"], input[name="password"]', password);
-    await sleep(500);
-    await page.click('button[type="submit"], button:has-text("Login"), button:has-text("Sign in")');
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-    await sleep(3000);
-    console.log('✅ 登录完成');
-
+    // Navigate to server page
     await page.goto(`${API_URL}/server/${SERVER_ID}`, { waitUntil: 'networkidle', timeout: 30000 });
-    await sleep(3000);
+    await sleep(5000);
 
     const bodyText = await page.textContent('body').catch(() => '');
     if (bodyText.includes('Please wait')) {
@@ -85,7 +127,9 @@ async function main() {
       }
     }
     if (!addBtn || !(await addBtn.isVisible().catch(() => false))) {
-      setOutput(`❌ 未找到 "Add 90 minutes" 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
+      // Take a screenshot for debugging
+      await page.screenshot({ path: '/tmp/godlike-debug.png' }).catch(() => {});
+      setOutput(`❌ 未找到 Add 90 minutes 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
       process.exit(1);
     }
     await addBtn.click();
@@ -105,7 +149,7 @@ async function main() {
         setOutput(`⏳ GODLIKE 已在冷却中\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${timerAfter.beijing}`);
         return;
       }
-      setOutput(`❌ 未找到 "Watch advertisment" 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
+      setOutput(`❌ 未找到 Watch advertisment 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
       process.exit(1);
     }
 
