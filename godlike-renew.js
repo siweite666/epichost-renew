@@ -119,21 +119,46 @@ async function main() {
       return;
     }
 
-    let addBtn = await page.$('button:has-text("Add 90 minutes"), button:has-text("90 minutes")');
-    if (!addBtn) {
-      for (const btn of await page.$$('button')) {
-        const text = await btn.textContent().catch(() => '');
-        if (text.includes('90') && text.includes('minute')) { addBtn = btn; break; }
+    // 先检查是否处于 Suspended 状态
+    let addBtn = null;
+    const bodyText = await page.textContent('body').catch(() => '');
+    
+    if (bodyText.includes('suspended') || bodyText.includes('Suspended')) {
+      // Suspended 状态：点击 "Renew your server" 按钮
+      console.log('⚠️ 服务器已暂停，寻找 Renew 按钮...');
+      addBtn = await page.$('button:has-text("Renew your server")');
+      if (!addBtn) {
+        for (const btn of await page.$$('button')) {
+          const text = await btn.textContent().catch(() => '');
+          if (text.toLowerCase().includes('renew')) { addBtn = btn; break; }
+        }
       }
+      if (!addBtn || !(await addBtn.isVisible().catch(() => false))) {
+        await page.screenshot({ path: '/tmp/godlike-debug.png' }).catch(() => {});
+        setOutput(`❌ 未找到 Renew your server 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
+        process.exit(1);
+      }
+      console.log('✅ 找到 Renew your server 按钮');
+      await addBtn.click();
+      await sleep(3000);
+    } else {
+      // Active 状态：点击 "Add 90 minutes" 按钮
+      addBtn = await page.$('button:has-text("Add 90 minutes"), button:has-text("90 minutes")');
+      if (!addBtn) {
+        for (const btn of await page.$$('button')) {
+          const text = await btn.textContent().catch(() => '');
+          if (text.includes('90') && text.includes('minute')) { addBtn = btn; break; }
+        }
+      }
+      if (!addBtn || !(await addBtn.isVisible().catch(() => false))) {
+        await page.screenshot({ path: '/tmp/godlike-debug.png' }).catch(() => {});
+        setOutput(`❌ 未找到 Add 90 minutes 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
+        process.exit(1);
+      }
+      console.log('✅ 找到 Add 90 minutes 按钮');
+      await addBtn.click();
+      await sleep(2000);
     }
-    if (!addBtn || !(await addBtn.isVisible().catch(() => false))) {
-      // Take a screenshot for debugging
-      await page.screenshot({ path: '/tmp/godlike-debug.png' }).catch(() => {});
-      setOutput(`❌ 未找到 Add 90 minutes 按钮\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
-      process.exit(1);
-    }
-    await addBtn.click();
-    await sleep(2000);
 
     let watchBtn = await page.$('button:has-text("Watch advertisment")');
     if (!watchBtn) {
