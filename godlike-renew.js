@@ -121,9 +121,9 @@ async function main() {
 
     // 先检查是否处于 Suspended 状态
     let addBtn = null;
-    const bodyText = await page.textContent('body').catch(() => '');
+    const pageBody = await page.textContent('body').catch(() => '');
     
-    if (bodyText.includes('suspended') || bodyText.includes('Suspended')) {
+    if (pageBody.includes('suspended') || bodyText.includes('Suspended')) {
       // Suspended 状态：点击 "Renew your server" 按钮
       console.log('⚠️ 服务器已暂停，寻找 Renew 按钮...');
       addBtn = await page.$('button:has-text("Renew your server")');
