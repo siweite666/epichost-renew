@@ -66,16 +66,36 @@ async function doLogin(page) {
   // Click submit
   await page.click('button[type="submit"], button:has-text("Login"), button:has-text("Sign in"), input[type="submit"]');
   
-  // Wait for redirect back to panel
-  await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-  await sleep(5000);
-
-  // Verify we're back on the panel (not still on login page)
-  const url = page.url();
-  if (url.includes('login') || url.includes('auth')) {
-    throw new Error(`登录失败，仍在登录页: ${url}`);
+  // Wait for OAuth callback to complete and redirect to dashboard
+  // The flow is: login page -> OAuth provider -> /auth/oauth/whmcs/callback?code=... -> dashboard
+  // We need to wait for the final redirect, not just any page load
+  try {
+    await page.waitForURL(url => {
+      const u = url.toString();
+      // Success: landed on dashboard (no login/auth paths, except callback which is intermediate)
+      return (u.includes(API_URL) && !u.includes('/login') && !u.includes('/auth/oauth'));
+    }, { timeout: 30000 });
+  } catch {
+    // If waitForURL times out, check where we ended up
+    const stuckUrl = page.url();
+    // Callback page with code means OAuth succeeded but redirect didn't complete
+    if (stuckUrl.includes('/auth/oauth/whmcs/callback') && stuckUrl.includes('code=')) {
+      console.log('⚠️ OAuth callback 已到达，尝试手动导航到 dashboard...');
+      await page.goto(`${API_URL}/server/${SERVER_ID}`, { waitUntil: 'networkidle', timeout: 30000 });
+      await sleep(3000);
+      const dashUrl = page.url();
+      if (dashUrl.includes('/login')) {
+        throw new Error(`登录失败，重定向后仍在登录页: ${dashUrl}`);
+      }
+      console.log(`✅ 登录完成（手动导航），当前页面: ${dashUrl}`);
+      return;
+    }
+    throw new Error(`登录超时，当前页面: ${stuckUrl}`);
   }
-  console.log(`✅ 登录完成，当前页面: ${url}`);
+
+  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+  await sleep(2000);
+  console.log(`✅ 登录完成，当前页面: ${page.url()}`);
 }
 
 async function main() {
