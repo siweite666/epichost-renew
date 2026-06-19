@@ -2,7 +2,7 @@ name: Auto Renew GODLIKE Server
 
 on:
   schedule:
-    - cron: '0 */2 * * *'  # 每2小时运行
+    - cron: '0 1 * * *'  # 每天北京时间9点
   workflow_dispatch: {}
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
         run: |
           npm init -y
           npm pkg set type=module
-          npm install playwright node-fetch
+          npm install playwright
           npx playwright install chromium --with-deps
 
       - name: Run renewal script
@@ -29,7 +29,6 @@ jobs:
         env:
           GODLIKE_EMAIL: ${{ secrets.GODLIKE_EMAIL }}
           GODLIKE_PASSWORD: ${{ secrets.GODLIKE_PASSWORD }}
-          GODLIKE_TOKEN: ${{ secrets.GODLIKE_TOKEN }}
         run: node godlike-renew.js
 
       - name: Telegram notification
@@ -41,5 +40,8 @@ jobs:
         run: |
           if [ -z "$MSG" ]; then MSG="⚠️ GODLIKE 续期脚本异常退出"; fi
           if [ -n "$TG_BOT_TOKEN" ] && [ -n "$TG_CHAT_ID" ]; then
-            curl -s "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage"               -d "chat_id=${TG_CHAT_ID}"               --data-urlencode "text=${MSG}"               -d "parse_mode=HTML" || true
+            curl -s "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+              -d "chat_id=${TG_CHAT_ID}" \
+              --data-urlencode "text=${MSG}" \
+              -d "parse_mode=HTML" || true
           fi
