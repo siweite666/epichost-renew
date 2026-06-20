@@ -21,6 +21,18 @@ function utcToBeijing(utcStr) {
   } catch { return utcStr; }
 }
 
+function calcRemainingHours(freeTimer) {
+  try {
+    const expire = new Date(freeTimer);
+    const now = new Date();
+    const diffMs = expire - now;
+    if (diffMs <= 0) return '已过期';
+    const hours = Math.floor(diffMs / 3600000);
+    const mins = Math.floor((diffMs % 3600000) / 60000);
+    return `${hours}小时${mins}分钟`;
+  } catch { return '未知'; }
+}
+
 async function getServerInfo(token) {
   try {
     const resp = await fetch(`${API_URL}/servers/${SERVER_ID}?locale=en`, {
@@ -240,19 +252,24 @@ async function main() {
 
     // Check if server needs renewal
     if (infoBefore.status === null && infoBefore.can_be_started) {
-      // Server is active, but let's try renewal anyway (might extend timer)
       console.log('ℹ️ 服务器状态正常，尝试续期延长...');
     }
 
     // Do the video renewal
     const result = await renewViaVideo(token);
 
+    // Get actual remaining time after renewal
+    const infoAfter = await getServerInfo(token);
+    const remaining = calcRemainingHours(infoAfter.timer);
+    console.log(`⏰ 实际剩余时间: ${remaining}`);
+
     await browser.close();
 
     if (result.success) {
-      setOutput(`✅ GODLIKE 续期成功 (+24小时)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${infoBefore.timer} → ${result.newTimer}`);
+      setOutput(`✅ GODLIKE 续期成功 (+24小时)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${utcToBeijing(infoBefore.timer)} → ${utcToBeijing(infoAfter.timer)}\n⏰ 剩余: ${remaining}`);
     } else {
-      setOutput(`❌ GODLIKE 续期失败\n${result.message}\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}`);
+      // Still show remaining time on failure (e.g. already at max)
+      setOutput(`❌ GODLIKE 续期失败\n${result.message}\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n⏰ 剩余: ${remaining}`);
       process.exit(1);
     }
 
