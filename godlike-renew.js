@@ -21,33 +21,55 @@ function utcToBeijing(utcStr) {
   } catch { return utcStr; }
 }
 
-function calcRemainingHours(freeTimer) {
-  try {
-    const expire = new Date(freeTimer);
-    const now = new Date();
-    const diffMs = expire - now;
-    if (diffMs <= 0) return '已过期';
-    const hours = Math.floor(diffMs / 3600000);
-    const mins = Math.floor((diffMs % 3600000) / 60000);
-    return `${hours}小时${mins}分钟`;
-  } catch { return '未知'; }
-}
-
 async function getServerInfo(token) {
   try {
     const resp = await fetch(`${API_URL}/servers/${SERVER_ID}?locale=en`, {
       headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
     });
-    if (!resp.ok) return { timer: 'unknown', status: 'unknown' };
+    if (!resp.ok) return { timer: 'unknown', status: 'unknown', raw: null };
     const data = await resp.json();
     const d = data.data || {};
+    console.log(`[DEBUG] API response keys: ${Object.keys(d).join(', ')}`);
+    console.log(`[DEBUG] free_timer: ${d.free_timer}`);
+    console.log(`[DEBUG] status: ${d.status}`);
     return {
       timer: d.free_timer || 'unknown',
       status: d.status || 'unknown',
       is_renewed: d.is_renewed || false,
-      can_be_started: d.can_be_started || false
+      can_be_started: d.can_be_started || false,
+      raw: d
     };
-  } catch { return { timer: 'unknown', status: 'unknown' }; }
+  } catch (e) {
+    console.log(`[DEBUG] getServerInfo error: ${e.message}`);
+    return { timer: 'unknown', status: 'unknown', raw: null };
+  }
+}
+
+async function getRemainingFromPage(page) {
+  // Navigate to server page and read remaining time
+  await page.goto(`${ULTRA_URL}/server/${SERVER_ID}`, { waitUntil: 'networkidle', timeout: 30000 });
+  await sleep(3000);
+  const bodyText = await page.textContent('body').catch(() => '');
+
+  // Look for patterns like "suspended in X hours Y minutes" or "Expires in Xh Ym"
+  const patterns = [
+    /(?:suspended|expires?|remaining)\s+(?:in\s+)?(\d+\s*(?:hours?|h)\s*\d*\s*(?:minutes?|m)?)/i,
+    /(\d+\s*(?:hours?|h)\s*\d*\s*(?:minutes?|m)?)/i,
+    /(\d+:\d+:\d+)/,
+  ];
+
+  for (const pat of patterns) {
+    const match = bodyText.match(pat);
+    if (match) {
+      console.log(`[DEBUG] Page remaining text: ${match[1]}`);
+      return match[1].trim();
+    }
+  }
+
+  // Log a snippet of the page for debugging
+  const snippet = bodyText.substring(0, 2000);
+  console.log(`[DEBUG] Page text snippet: ${snippet}`);
+  return null;
 }
 
 async function doLogin(page) {
@@ -55,18 +77,15 @@ async function doLogin(page) {
   const password = process.env.GODLIKE_PASSWORD;
   if (!email || !password) throw new Error('未配置 GODLIKE_EMAIL/PASSWORD');
 
-  // Navigate to ultra panel server page (will redirect to login if not authenticated)
   await page.goto(`${ULTRA_URL}/server/${SERVER_ID}`, { waitUntil: 'networkidle', timeout: 60000 });
   await sleep(3000);
 
-  // Check if already logged in (server page loaded with server content)
   const pageText = await page.textContent('body').catch(() => '');
   if (pageText.includes('Sc2mdpUo_436727') || pageText.includes('My Servers')) {
     console.log('✅ 已登录（session 有效）');
     return;
   }
 
-  // Need to login - click "Through Login/Password" button
   const loginPassBtn = await page.$('button:has-text("Through Login/Password")');
   if (loginPassBtn && await loginPassBtn.isVisible().catch(() => false)) {
     console.log('🔐 使用账号密码登录...');
@@ -74,7 +93,6 @@ async function doLogin(page) {
     await sleep(2000);
   }
 
-  // Fill credentials
   const emailSel = 'input[placeholder*="Email"], input[placeholder*="email"], input[name="email"], input[type="email"]';
   const passSel = 'input[type="password"], input[placeholder*="Password"], input[placeholder*="password"]';
 
@@ -83,18 +101,15 @@ async function doLogin(page) {
   await page.fill(passSel, password);
   await sleep(500);
 
-  // Click Login button
   await page.click('button:has-text("Login")');
   await sleep(5000);
 
-  // Wait for redirect to server page
   try {
     await page.waitForURL(url => {
       const u = url.toString();
       return u.includes('ultra.panel.godlike.host') && !u.includes('/login');
     }, { timeout: 30000 });
   } catch {
-    // If direct login didn't work, try OAuth
     console.log('⚠️ 直接登录可能失败，尝试 OAuth...');
     await page.goto(`${ULTRA_URL}/server/${SERVER_ID}`, { waitUntil: 'networkidle', timeout: 60000 });
     await sleep(3000);
@@ -103,8 +118,6 @@ async function doLogin(page) {
     if (authBtn && await authBtn.isVisible().catch(() => false)) {
       await authBtn.click();
       await sleep(5000);
-
-      // Fill WHMCS credentials
       await page.waitForSelector('input[name="username"], input[type="email"]', { timeout: 10000 }).catch(() => {});
       await page.fill('input[name="username"], input[type="email"], input[placeholder*="Email"]', email);
       await page.fill('input[type="password"]', password);
@@ -125,14 +138,12 @@ async function doLogin(page) {
 }
 
 async function extractToken(page) {
-  // Try to get token from localStorage
   let token = await page.evaluate(() => localStorage.getItem('access_token'));
   if (token) {
     console.log(`🔑 从 localStorage 获取到 token: ${token.substring(0, 10)}...`);
     return token;
   }
 
-  // If not in localStorage, intercept from network requests
   console.log('⏳ 等待 API 请求以捕获 token...');
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('无法获取 token')), 20000);
@@ -145,7 +156,6 @@ async function extractToken(page) {
         resolve(tk);
       }
     });
-    // Trigger a page reload to generate API requests
     page.reload({ waitUntil: 'networkidle' }).catch(() => {});
   });
 }
@@ -153,7 +163,6 @@ async function extractToken(page) {
 async function renewViaVideo(token) {
   console.log('🎬 开始视频续期流程...');
 
-  // Step 1: Check if can watch
   const statusResp = await fetch(`${API_URL}/servers/${SERVER_UUID}/free-renewal/video/status?type=youtube_iter1&locale=en`, {
     headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
   });
@@ -165,7 +174,6 @@ async function renewViaVideo(token) {
     return { success: false, message: `暂时不能看视频续期，需等待 ${waitTime || '未知时间'}` };
   }
 
-  // Step 2: Start video session
   const startResp = await fetch(`${API_URL}/servers/${SERVER_UUID}/free-renewal/video/start?locale=en`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json', 'Content-Type': 'application/json' },
@@ -178,13 +186,12 @@ async function renewViaVideo(token) {
   const renewalUuid = startData.uuid;
   console.log(`✅ 视频会话已启动: ${renewalUuid}`);
 
-  // Step 3: Update video time in 30s increments (server requires ~30s per update)
   let currentTime = 0;
-  const milestone = 240; // 4 minutes required
+  const milestone = 240;
 
   while (currentTime < milestone) {
     currentTime += 30;
-    await sleep(500); // Small delay between requests
+    await sleep(500);
 
     const updateResp = await fetch(`${API_URL}/servers/${SERVER_UUID}/free-renewal/video/update-time?locale=en`, {
       method: 'POST',
@@ -204,7 +211,7 @@ async function renewViaVideo(token) {
     console.log(`⏱️ ${currentTime}/${milestone}s - ${updateData.message}`);
 
     if (updateData.new_free_timer) {
-      console.log(`🎉 续期成功! 新到期时间: ${updateData.new_free_timer}`);
+      console.log(`🎉 续期成功! API返回新到期: ${updateData.new_free_timer}`);
       return { success: true, newTimer: updateData.new_free_timer };
     }
   }
@@ -223,7 +230,6 @@ async function main() {
   const page = await context.newPage();
 
   try {
-    // Login with retry
     console.log('🔐 登录...');
     let loginOk = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -238,38 +244,32 @@ async function main() {
     }
     if (!loginOk) throw new Error('3次登录尝试全部失败');
 
-    // Navigate to server page to ensure token is in localStorage
     await page.goto(`${ULTRA_URL}/server/${SERVER_ID}`, { waitUntil: 'networkidle', timeout: 30000 });
     await sleep(3000);
 
-    // Extract auth token
     const token = await extractToken(page);
     if (!token) throw new Error('无法获取认证 token');
 
-    // Get current timer
+    // Get remaining time from page before renewal
+    const remainingBefore = await getRemainingFromPage(page);
+    console.log(`📅 续期前页面剩余: ${remainingBefore || '未知'}`);
+
     const infoBefore = await getServerInfo(token);
-    console.log(`📅 当前到期时间: ${infoBefore.timer}`);
 
-    // Check if server needs renewal
-    if (infoBefore.status === null && infoBefore.can_be_started) {
-      console.log('ℹ️ 服务器状态正常，尝试续期延长...');
-    }
-
-    // Do the video renewal
     const result = await renewViaVideo(token);
 
-    // Get actual remaining time after renewal
-    const infoAfter = await getServerInfo(token);
-    const remaining = calcRemainingHours(infoAfter.timer);
-    console.log(`⏰ 实际剩余时间: ${remaining}`);
+    // Get remaining time from page after renewal (same page, just reload)
+    const remainingAfter = await getRemainingFromPage(page);
+    console.log(`📅 续期后页面剩余: ${remainingAfter || '未知'}`);
 
     await browser.close();
 
     if (result.success) {
-      setOutput(`✅ GODLIKE 续期成功 (+24小时)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n📅 到期: ${utcToBeijing(infoBefore.timer)} → ${utcToBeijing(infoAfter.timer)}\n⏰ 剩余: ${remaining}`);
+      const remainText = remainingAfter || '未知';
+      setOutput(`✅ GODLIKE 续期成功 (+24小时)\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n⏰ 剩余: ${remainText}`);
     } else {
-      // Still show remaining time on failure (e.g. already at max)
-      setOutput(`❌ GODLIKE 续期失败\n${result.message}\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n⏰ 剩余: ${remaining}`);
+      const remainText = remainingAfter || remainingBefore || '未知';
+      setOutput(`❌ GODLIKE 续期失败\n${result.message}\n━━━━━━━━━━━━━━━\n🕐 ${timeCN}\n⏰ 剩余: ${remainText}`);
       process.exit(1);
     }
 
