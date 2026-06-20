@@ -2,8 +2,8 @@ name: GODLIKE Public Page Renew
 
 on:
   schedule:
-    # 每6小时运行一次（避开冷却期）
-    - cron: '0 */3 * * *'
+    # 每天北京时间9点运行一次
+    - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
       godlike_id:
